@@ -1,0 +1,5 @@
+{
+    "board": "arduino:renesas_portenta:portenta_c33",
+    "port": "COM3",
+    "programmer": "cmsis-dap"
+}

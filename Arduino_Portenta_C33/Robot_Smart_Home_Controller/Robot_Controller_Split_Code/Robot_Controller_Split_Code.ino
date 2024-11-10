@@ -42,18 +42,17 @@
 /*************************
   Third-Party Libraries
 *************************/
+#include <SparkFun_I2C_Mux_Arduino_Library.h>
+QWIICMUX mux;
 
-//  DS3231 Real Time Clock
-#include <RTClib.h>
-RTC_DS3231 rtc;
-//#include <DateTime.h>
+//  DS3231 Real Time Clock - Adafruit Fork
+#include "DS3232.h"
+DS3232 rtc;
 
 //Include the NTP library
 #include <NTPClient.h>
 WiFiUDP Udp; // A UDP instance to let us send and receive packets over UDP
 NTPClient time_client(Udp);
-
-// Include the Real Time Clock library
 
 #include <Adafruit_LIS3MDL.h>
 Adafruit_LIS3MDL lis3;
@@ -70,6 +69,12 @@ ScioSense_ENS160  ens160(ENS160_I2CADDR_1);
 
 #include <SensirionI2CScd4x.h>
 SensirionI2CScd4x scd40;
+
+//  Check I2C device address and correct line below (by default address is 0x29 or 0x28)
+//    id, address
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
+Adafruit_BNO055 bno055 = Adafruit_BNO055(55, 0x28);
 
 /**********************
   Utility routines
@@ -190,6 +195,57 @@ void halt (String message, bool wifi_halt=false, char *wifi_ssid=ssid) {
   }
 }
 
+void bno_print_event(sensors_event_t* event) {
+  //  Dumb values, easy to spot any problem
+  double x = -1000000, y = -1000000 , z = -1000000;
+
+  if (event->type == SENSOR_TYPE_ACCELEROMETER) {
+    Serial.print("Accelerometer: ");
+    x = event->acceleration.x;
+    y = event->acceleration.y;
+    z = event->acceleration.z;
+  } else if (event->type == SENSOR_TYPE_ORIENTATION) {
+    Serial.print("Orientation: ");
+    x = event->orientation.x;
+    y = event->orientation.y;
+    z = event->orientation.z;
+  } else if (event->type == SENSOR_TYPE_MAGNETIC_FIELD) {
+    Serial.print("Magnetometer: ");
+    x = event->magnetic.x;
+    y = event->magnetic.y;
+    z = event->magnetic.z;
+  } else if (event->type == SENSOR_TYPE_GYROSCOPE) {
+    Serial.print("Gyroscope: ");
+    x = event->gyro.x;
+    y = event->gyro.y;
+    z = event->gyro.z;
+  } else if (event->type == SENSOR_TYPE_ROTATION_VECTOR) {
+    Serial.print("Rotation: ");
+    x = event->gyro.x;
+    y = event->gyro.y;
+    z = event->gyro.z;
+  } else if (event->type == SENSOR_TYPE_LINEAR_ACCELERATION) {
+    Serial.print("Linear: ");
+    x = event->acceleration.x;
+    y = event->acceleration.y;
+    z = event->acceleration.z;
+  } else if (event->type == SENSOR_TYPE_GRAVITY) {
+    Serial.print("Gravity: ");
+    x = event->acceleration.x;
+    y = event->acceleration.y;
+    z = event->acceleration.z;
+  } else {
+    Serial.print("Unknown: ");
+  }
+
+  Serial.print("x = ");
+  Serial.print(x);
+  Serial.print(", y = ");
+  Serial.print(y);
+  Serial.print(", z = ");
+  Serial.println(z);
+}
+
 /*
   Do the actual left padding - there is no checking done
 
@@ -290,8 +346,7 @@ String left_pad (String str, uint8_t pad_length=DEFAULT_PAD_LENGTH, bool numeric
 
   Parameters:
 */
-String timestamp (bool show_full_date=SHOW_FULL_DATE, bool hours_mode=SHOW_24_HOURS, bool long_date=SHOW_LONG_DATE, bool show_seconds=SHOW_SECONDS) {
-  DateTime current = rtc.now();
+String timestamp (QWIICMUX *mx, DS3232 *clock, uint8_t port, bool show_full_date=SHOW_FULL_DATE, bool hours_mode=SHOW_24_HOURS, bool long_date=SHOW_LONG_DATE, bool show_seconds=SHOW_SECONDS) {
   String date_time = "", date_str = "D*", time_str = "T*";
   String year_str = "Y*", month_str = "M*", day_str = "D*", week_day_str;
   //String hours_str;
@@ -300,23 +355,30 @@ String timestamp (bool show_full_date=SHOW_FULL_DATE, bool hours_mode=SHOW_24_HO
   uint8_t week_day, day, suffix;
   uint8_t month, hours, minutes, seconds;
 
-  //  Create a standard date and time stamp
-  date_time = left_pad(String(current.year()), 4) + "-" + left_pad(String(current.month()), 2) + "-" +
-    left_pad(String(current.day()), 2) + "T" + left_pad(String(current.hour()), 2) + ":" +
-    left_pad(String(current.minute()), 2) + ":" + left_pad(String(current.second()), 2);
+  set_mux_port(mx, port, MUX_DS3231_NAME);
 
-  //  Get all the date and time information
-  hours = current.hour();
-  minutes = current.minute();
-  seconds = current.second();
-  year = current.year();
-  month = current.month();
-  day = current.day();
-  week_day = current.dayOfTheWeek();
-  year_str = String(year);
+  clock->read();
+
+  year = clock->year();
+  month = clock->month();
+  day = clock->day();
+  hours = clock->hours();
+  minutes = clock->minutes();
+  seconds = clock->seconds();
+  week_day = clock->weekDay();
+
+  //  Create a standard date and time stamp
+  date_time = left_pad(String(year), 4) + "-" + left_pad(String(month), 2) + "-" +
+    left_pad(String(day), 2) + "T" + left_pad(String(hours), 2) + ":" +
+    left_pad(String(minutes), 2) + ":" + left_pad(String(seconds), 2);
 
   //  Default time and date strings
   time_str = left_pad(String(hours), 2) + ":" + left_pad(String(minutes), 2);
+
+  if (show_seconds) {
+    time_str = time_str + ":" + left_pad(String(seconds), 2);
+  }
+  
   date_str = left_pad(String(month), 2) + "/" + left_pad(String(day), 2) + "/" + left_pad(String(year), 4);
 
   if (show_full_date) {
@@ -353,11 +415,9 @@ String timestamp (bool show_full_date=SHOW_FULL_DATE, bool hours_mode=SHOW_24_HO
       week_day_str = days_of_the_week[week_day];
       day_str = String(day) + day_suffix;
       month_str = long_months[month];
-      date_str = week_day_str + ", " + long_months[month - 1] + " " + day_str + ", " + year_str;
+      date_str = week_day_str + ", " + long_months[month - 1] + " " + day_str + ", 20" + left_pad(String(year), 2);
     } else {
-      day_str = String(day);
-      month_str = String(month);
-      date_str = day_str + "/" + month_str + "/" + year_str;
+      date_str = left_pad(String(day), 2) + "/" + left_pad(String(month), 2) + "/20" + left_pad(String(year), 2);
     }
   }
 
@@ -395,115 +455,207 @@ String timestamp (bool show_full_date=SHOW_FULL_DATE, bool hours_mode=SHOW_24_HO
   return date_time;
 }
 
-/*
-  Set the onboard RTC from an NTP (internet) time source
-
-  Returns: (RTCTime) current time
-*/
-/*
-RTC_DS3231 set_rtc (int utc_offset_hrs, RTC_DS3231 *rtc) {
-  String current_time, time_to_set;
-
-  // Get the current date and time from an NTP server and convert
-  // it to UTC +2 by passing the time zone offset in hours.
-  // You may change the time zone offset to your local one.
-  auto timeZoneOffsetHours = -7;
-  auto unix_time = time_cl->getEpochTime() + (utc_offset_hrs * 3600);
-  Serial.print("Unix time = ");
-  Serial.println(unix_time);
-  time_to_set = RTCTime(unix_time);
-  RTC.setTime(time_to_set);
-
-  // Retrieve the date and time from the RTC and print them
-  RTC.getTime(current_time); 
-  Serial.println("The RTC was just set to: " + String(current_time));
-
-  return current_time;
-}
-*/
-/*
-  Convert the Celsius temperature to Fahrenheit
-
-  Returns: (float) temperature in fahrenheit
-*/
 float to_fahrenheit (float celsius) {
   return celsius * 1.8 + 32;
 }
 
-void init_ens160 (void) {
-  bool success = ens160.begin();
+void set_mux_port (QWIICMUX *mx, uint8_t port, String device_name) {
+  if (port == DEVICE_NOT_PRESENT) {
+    halt(device_name + " mux port is not valid!");
+  } else {
+    mx->setPort(port);
+  }
+}
 
-  if (success) {
-    Serial.print("Found an ENS160 MOX Sensor");
+void init_mux (QWIICMUX *mx) {
+  bool mux_present;
 
-    if (ens160.available()) {
-      // Print ENS160
-      Serial.print("Revison: ");
-      Serial.print(ens160.getMajorRev());
-      Serial.print(".");
-      Serial.print(ens160.getMinorRev());
-      Serial.print(".");
-      Serial.print(ens160.getBuild());  
+  //  Initialize the Sparkfun I2C Multiplexor
+  mux_present = mx->begin();
 
-      success = ens160.setMode(ENS160_OPMODE_STD);
+  if (mux_present) {
+    Serial.println("Found a SparkFun I2C Multiplexor");
+  } else {
+    halt("No SparkFun I2C Multiplexor was detected!");
+  }
+}
 
-      if (success) {
-        Serial.println(" in Standard mode ");
-      } else {
-        halt("Unable to set mode on the ENS160 MOX sensor!");
+bool init_ds3231 (QWIICMUX *mx, DS3232 *clock, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_DS3231_PORT, MUX_DS3231_NAME);
+
+  if (clock->begin() == DS3232_OK) {
+    sen_stat->ds3231 = true;
+    Serial.println("Found a DS3231 Real Time Clock");
+  } else {
+    sen_stat->ds3231 = false;
+    halt("Could not find a DS3231 Real Time Clock!");
+  }
+
+  return sen_stat->ds3231;
+}
+
+bool init_veml7700 (QWIICMUX *mx, System_Sensor_Status *sen_stat) {
+  set_mux_port(mx, MUX_VEML7700_PORT, MUX_VEML7700_NAME);
+
+  if (veml.begin()) {
+    sen_stat->veml7700 = true;
+
+    Serial.print("Found a VEML7700 Lux sensor with a Gain of ");
+
+    switch (veml.getGain()) {
+      case VEML7700_GAIN_1:
+        Serial.print("1");
+        break;
+      case VEML7700_GAIN_2:
+        Serial.print("2");
+        break;
+      case VEML7700_GAIN_1_4:
+        Serial.print("1/4");
+        break;
+      case VEML7700_GAIN_1_8:
+        Serial.print("1/8");
+        break;
+    }
+
+    Serial.print(" and Integration Time of ");
+
+    switch (veml.getIntegrationTime()) {
+      case VEML7700_IT_25MS:
+        Serial.print("25");
+        break;
+      case VEML7700_IT_50MS:
+        Serial.print("50");
+        break;
+      case VEML7700_IT_100MS:
+        Serial.print("100");
+        break;
+      case VEML7700_IT_200MS:
+        Serial.print("200");
+        break;
+      case VEML7700_IT_400MS:
+        Serial.print("400");
+        break;
+      case VEML7700_IT_800MS:
+        Serial.print("800");
+        break;
+    }
+
+    Serial.println(" ms");
+  } else {
+    sen_stat->veml7700 = false;
+  }
+
+  return sen_stat->veml7700;
+}
+
+bool init_bno055 (QWIICMUX *mx, Adafruit_BNO055 *bno, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_BNO055_PORT, MUX_BNO055_NAME);
+
+  if (bno->begin()) {
+    sen_stat->bno055 = true;
+    Serial.println("Found a BNO055 IMU");
+  } else {
+    Serial.println("There is no BNO055 IMU!");
+    sen_stat->bno055 = false;
+  }
+
+  return sen_stat->bno055;
+}
+
+bool init_ens160 (QWIICMUX *mx, ScioSense_ENS160 *ens, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_ENS160_PORT, MUX_ENS160_NAME);
+
+  sen_stat->ens160 = ens->begin();
+
+  if (sen_stat->ens160) {
+    Serial.print("Found an ENS160 MOX Sensor, ");
+
+    if (sen_stat->ens160) {
+      sen_stat->ens160 = ens->available();
+
+      if (sen_stat->ens160) {
+        Serial.print("Revison ");
+        Serial.print(ens->getMajorRev());
+        Serial.print(".");
+        Serial.print(ens->getMinorRev());
+        Serial.print(".");
+        Serial.print(ens->getBuild());  
+
+        sen_stat->ens160 = ens->setMode(ENS160_OPMODE_STD);
+
+        if (sen_stat->ens160) {
+          Serial.println(" in Standard mode ");
+        }
       }
     }
-  } else {
-    halt("Unable to find the ENS160 MOX sensor!");
   }
+
+  return sen_stat->ens160;
 }
 
 /*
   Initialize the SCD-40 CO2, Temperature, and Humidity sensor
 */
-void init_scd40 (void) {
+uint16_t init_scd40 (QWIICMUX *mx, SensirionI2CScd4x *scd, System_Sensor_Status *sen_stat) {
   String error_message;
-  uint16_t error, serial0, serial1, serial2;
+  uint16_t error = 0, serial0, serial1, serial2;
 
-  scd40.begin(Wire);
+  /*
+    Error message codes:
+      268 - can not get serial number
+  */
 
-  error = scd40.getSerialNumber(serial0, serial1, serial2);
+  //  Set the mux port
+  set_mux_port(mx, MUX_SCD40_PORT, MUX_SCD40_NAME);
+
+  scd->begin(Wire);
+
+  error = scd->getSerialNumber(serial0, serial1, serial2);
 
   if (error) {
-    error_message = "SCD-40: Error trying to get the serial number: Code " + String(error);
-    halt(error_message);
+    Serial.println("SCD-40: Error trying to get the serial number: Code " + String(error));
   } else {
     Serial.print("Found an SCD-40 with serial number: 0x");
     print_uint_16_hex(serial0);
     print_uint_16_hex(serial1);
     print_uint_16_hex(serial2);
     Serial.println();
-  }
 
-  //  Stop potentially previously started measurement
-  error = scd40.stopPeriodicMeasurement();
-    
-  if (error) {
-    error_message = "SCD-40: Error trying to stop periodic measurement: Code " + String(error);
-    halt(error_message);
-  } else {
-    //  Start Measurement
-    error = scd40.startPeriodicMeasurement();
-
+    //  Stop potentially previously started measurement
+    error = scd->stopPeriodicMeasurement();
+      
     if (error) {
-      error_message = "SCD-40: Error trying to execute start periodic measurement: Code " + String(error);
-      halt(error_message);
+      Serial.println("SCD-40: Error trying to stop periodic measurement: Code " + String(error));
+    } else {
+      //  Start Measurement
+      error = scd->startPeriodicMeasurement();
+
+      if (error) {
+        Serial.println("SCD-40: Error trying to execute start periodic measurement: Code " + String(error));
+      }
     }
   }
+
+  if (error) {
+    sen_stat->scd40 = false;
+  }
+
+  return error;
 }
 
 /*
   Initialize the SHT4x temperature and humidity `
 */
-Adafruit_SHT4x init_sht4x (Adafruit_SHT4x *sht, System_Sensor_Status *sen_stat) {
-  sen_stat->sht45_status = sht->begin();
+bool init_sht4x (QWIICMUX *mx, Adafruit_SHT4x *sht, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_SHT45_PORT, MUX_SHT45_NAME);
 
-  if (sen_stat->sht45_status) {
+  sen_stat->sht45 = sht->begin();
+
+  if (sen_stat->sht45) {
     Serial.print("Found an SHT4x sensor with the serial number 0x");
     Serial.println(sht->readSerial(), HEX);
 
@@ -558,17 +710,20 @@ Adafruit_SHT4x init_sht4x (Adafruit_SHT4x *sht, System_Sensor_Status *sen_stat) 
     halt("Could not find any SHT4x sensors!");
   }
 
-  return *sht;
+  return sen_stat->sht45;
 }
 
 /*
   Initialize the SHT45 Temeprature and Humidity sensor
 */
-Adafruit_LIS3MDL init_lis3mdl (Environment_Data curr_data, Adafruit_LIS3MDL *lis3, System_Sensor_Status *sen_stat) {
-  // Try to initialize!
-  sen_stat->lis3mdl_status = lis3->begin_I2C();
+bool init_lis3mdl (QWIICMUX *mx, Adafruit_LIS3MDL *lis3, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_LIS3MDL_PORT, MUX_LIS3MDL_NAME);
 
-  if (sen_stat->lis3mdl_status) {          // hardware I2C mode, can pass in address & alt Wire
+  // Try to initialize!
+  sen_stat->lis3mdl = lis3->begin_I2C();
+
+  if (sen_stat->lis3mdl) {          // hardware I2C mode, can pass in address & alt Wire
     Serial.println("Found the LIS3MDL Magnetometer!");
 
     /*  
@@ -598,8 +753,8 @@ Adafruit_LIS3MDL init_lis3mdl (Environment_Data curr_data, Adafruit_LIS3MDL *lis
     lis3->setDataRate(LIS3MDL_DATARATE_155_HZ);
 
     //  You can check the datarate by looking at the frequency of the DRDY pin
-    //  Serial.print("Data rate set to: ");
-/*
+    Serial.print("Data rate set to: ");
+
     switch (lis3->getDataRate()) {
       case LIS3MDL_DATARATE_0_625_HZ:
         Serial.println("0.625 Hz");
@@ -637,15 +792,15 @@ Adafruit_LIS3MDL init_lis3mdl (Environment_Data curr_data, Adafruit_LIS3MDL *lis
       case LIS3MDL_DATARATE_1000_HZ:
         Serial.println("1000 Hz");
         break;
-      case default:
+      default:
         Serial.println("Invalid value!");
+        break;
     }
-*/
     
-    //lis3->setRange(LIS3MDL_RANGE_4_GAUSS);
+    lis3->setRange(LIS3MDL_RANGE_4_GAUSS);
 
-    //Serial.print("Range set to: ");
-/*
+    Serial.print("Range set to: ");
+
     switch (lis3->getRange()) {
       case LIS3MDL_RANGE_4_GAUSS:
         Serial.println("+-4 gauss");
@@ -662,27 +817,26 @@ Adafruit_LIS3MDL init_lis3mdl (Environment_Data curr_data, Adafruit_LIS3MDL *lis
     }
 
     lis3->setIntThreshold(500);
-
     lis3->configInterrupt(false, false, true, // enable z axis
                             true, // polarity
                             false, // don't latch
                             true); // enabled!
-*/
-  } else {
-    halt("Unable to find and initialize the LIS3MDL magnetometer!");
   }
 
-  return *lis3;
+  return sen_stat->lis3mdl;
 }
 
 /*
   Initialize the LSM6DSOX IMU
 */
-bool init_lsm6dsox (System_Sensor_Status *sen_stat) {
-  //  Initialize the IMU
+bool init_lsm6dsox (QWIICMUX *mx, System_Sensor_Status *sen_stat) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_LSM6DSOX_9DOF_PORT, MUX_LSM6DSOX_9DOF_NAME);
 
+  //  Initialize the IMU
   if (IMU.begin()) {
     Serial.println("Found an LSM6DSOX IMU!");
+    sen_stat->lsm6dsox = true;
 
     Serial.print("Accelerometer sample rate = ");
     Serial.print(IMU.accelerationSampleRate());
@@ -691,125 +845,12 @@ bool init_lsm6dsox (System_Sensor_Status *sen_stat) {
     Serial.print("Gyroscope sample rate = ");
     Serial.print(IMU.gyroscopeSampleRate());
     Serial.println(" Hz");
-    /*
-      Accelerometer Range
-
-      Possible values:
-        LSM6DS_ACCEL_RANGE_2_G:
-        LSM6DS_ACCEL_RANGE_4_G:
-        LSM6DS_ACCEL_RANGE_8_G:
-        LSM6DS_ACCEL_RANGE_16_G:
-    */
-    //sx->setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
-
-    /*
-      Accelerometer Data Rate
-
-      Possible Values:
-        LSM6DS_RATE_SHUTDOWN:
-        LSM6DS_RATE_12_5_HZ:
-        LSM6DS_RATE_26_HZ:
-        LSM6DS_RATE_52_HZ:
-        LSM6DS_RATE_104_HZ:
-        LSM6DS_RATE_208_HZ:
-        LSM6DS_RATE_416_HZ:
-        LSM6DS_RATE_833_HZ:
-        LSM6DS_RATE_1_66K_HZ:
-        LSM6DS_RATE_3_33K_HZ:
-        LSM6DS_RATE_6_66K_HZ:
-    */
-    //sx->setAccelDataRate(LSM6DS_RATE_12_5_HZ);
-
-    /*
-      Gyroscope Range
-
-      Possible Values:
-        LSM6DS_GYRO_RANGE_125_DPS:
-        LSM6DS_GYRO_RANGE_250_DPS:
-        LSM6DS_GYRO_RANGE_500_DPS:
-        LSM6DS_GYRO_RANGE_1000_DPS:
-        LSM6DS_GYRO_RANGE_2000_DPS:
-        ISM330DHCX_GYRO_RANGE_4000_DPS:
-    */
-    //sx->setGyroRange(LSM6DS_GYRO_RANGE_250_DPS );
-
-    /*
-      Gyroscope Data Rate
-
-      Possible Values:
-        LSM6DS_RATE_SHUTDOWN:
-        LSM6DS_RATE_12_5_HZ:
-        LSM6DS_RATE_26_HZ:
-        LSM6DS_RATE_52_HZ:
-        LSM6DS_RATE_104_HZ:
-        LSM6DS_RATE_208_HZ:
-        LSM6DS_RATE_416_HZ:
-        LSM6DS_RATE_833_HZ:
-        LSM6DS_RATE_1_66K_HZ:
-        LSM6DS_RATE_3_33K_HZ:
-        LSM6DS_RATE_6_66K_HZ:
-    */
-    //sx->setGyroDataRate(LSM6DS_RATE_12_5_HZ);
-    return true;
   } else {
-    return false;
-    halt("Failed to initialize the LSM6DSOX IMU!");
-  }
-}
-
-/*
-Adafruit_VEML7700 init_veml7700 (Adafruit_VEML7700 *vm) {
-  if (vm->begin()) {
-    Serial.println("Found a VEML7700 Lux sensor");
-    Serial.println("Settings used for reading:");
-    Serial.print(F("Gain: "));
-
-    switch (vm->getGain()) {
-      case GAIN_1:
-        Serial.println("1");
-        break;
-      case VEML7700_GAIN_2:
-        Serial.println("2");
-        break;
-      case VEML7700_GAIN_1_4:
-        Serial.println("1/4");
-        break;
-      case VEML7700_GAIN_1_8:
-        Serial.println("1/8");
-        break;
-    }
-
-    Serial.print(F("Integration Time (ms): "));
-
-    switch (vm->getIntegrationTime()) {
-      case VEML7700_IT_25MS:
-        Serial.println("25");
-        break;
-      case VEML7700_IT_50MS:
-        Serial.println("50");
-        break;
-      case VEML7700_IT_100MS:
-        Serial.println("100");
-        break;
-      case VEML7700_IT_200MS:
-        Serial.println("200");
-        break;
-      case VEML7700_IT_400MS:
-        Serial.println("400");
-        break;
-      case VEML7700_IT_800MS:
-        Serial.println("800");
-        break;
-    }
-  } else {
-    Serial.println("Unable to find the VEML7700 sensor!");
-
-    halt();
+    sen_stat->lsm6dsox = false;
   }
 
-  return *vm;
+  return sen_stat->lsm6dsox;
 }
-*/
 
 /*    
   Print out the connection status:
@@ -1098,7 +1139,7 @@ void init_html (uint8_t max_pages=MAX_NUM_PAGES) {
 /*
   Check the environment data and intialize it if necessary
 */
-Environment_Data check_data (Environment_Data curr_data) {
+Environment_Data check_data (QWIICMUX *mx, Environment_Data curr_data) {
   Environment_Data result;
   Three_Axis filler;
 
@@ -1139,6 +1180,28 @@ Environment_Data check_data (Environment_Data curr_data) {
     result.lsm6dsox.magnetometer = filler;
     result.lsm6dsox.fahrenheit = 0.0;
     result.lsm6dsox.celsius = 0.0;
+
+    if (USING_BNO055) {
+      //  Set the mux port
+      set_mux_port(mx, MUX_BNO055_PORT, MUX_BNO055_NAME);
+
+      //  Can not call get_bno055() because it also calls this procedure
+      //  Initialize data for the BNO055 IMU    
+      bno055.getCalibration(&sensors.bno055.system_cal, &sensors.bno055.gyroscope_cal, &sensors.bno055.accelerometer_cal, &sensors.bno055.magnetometer_cal);
+      bno055.getEvent(&sensors.bno055.orientation_data, Adafruit_BNO055::VECTOR_EULER);
+      bno055.getEvent(&sensors.bno055.angular_velocity_data, Adafruit_BNO055::VECTOR_GYROSCOPE);
+      bno055.getEvent(&sensors.bno055.linear_acceleration_data, Adafruit_BNO055::VECTOR_LINEARACCEL);
+      bno055.getEvent(&sensors.bno055.magnetometer_data, Adafruit_BNO055::VECTOR_MAGNETOMETER);
+      bno055.getEvent(&sensors.bno055.accelerometer_data, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+      bno055.getEvent(&sensors.bno055.gravity_data, Adafruit_BNO055::VECTOR_GRAVITY);
+
+      sensors.bno055.x_pos = sensors.bno055.x_pos + ACCEL_POS_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.x;
+      sensors.bno055.y_pos = sensors.bno055.y_pos + ACCEL_POS_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.y;
+
+      //  Velocity of sensor in the direction it's facing
+      sensors.bno055.heading_velocity = ACCEL_VEL_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.x / cos(DEG_2_RAD * sensors.bno055.orientation_data.orientation.x);
+      sensors.bno055.heading = sensors.bno055.orientation_data.orientation.x;
+    }
   }
 
   return result;
@@ -1148,10 +1211,13 @@ Environment_Data check_data (Environment_Data curr_data) {
   Get readings from the LIS3MDL Magnetometer and put them in the environment
     data structure.
 */
-Environment_Data get_lis3mdl (Environment_Data curr_data, Adafruit_LIS3MDL*lis3) {
+Environment_Data get_lis3mdl (QWIICMUX *mx, Environment_Data curr_data, Adafruit_LIS3MDL *lis3) {
   Environment_Data sensors;
   sensors_event_t event;
-  sensors = check_data(curr_data);
+  sensors = check_data(mx,curr_data);
+
+  //  Set the mux port
+  set_mux_port(mx, MUX_LIS3MDL_PORT, MUX_LIS3MDL_NAME);
 
   lis3->getEvent(&event);
   sensors.lsm6dsox.magnetometer.x = event.magnetic.x;
@@ -1168,9 +1234,12 @@ String imu_format_xyz_html (Three_Axis readings) {
   return "<SPAN STYLE=\"color: yellow\">x</SPAN> = <SPAN STYLE=\"color: green\">" + String(readings.x) + "</SPAN>, <SPAN STYLE=\"color: yellow\">y</SPAN> = <SPAN STYLE=\"color: green\">" + String(readings.y) + "</SPAN>, <SPAN STYLE=\"color: yellow\">z</SPAN> = <SPAN STYLE=\"color: green\">" + String(readings.z) + "</SPAN>";
 }
 
-Environment_Data get_ens160 (Environment_Data curr_data, ScioSense_ENS160 *ens) {
+Environment_Data get_ens160 (QWIICMUX *mx, Environment_Data curr_data, ScioSense_ENS160 *ens) {
   uint16_t count = 0;
   Environment_Data sensors;
+
+  //  Set the mux port
+  set_mux_port(mx, MUX_ENS160_PORT, MUX_ENS160_NAME);
 
   while (!ens->available() and count < ENS160_MAX_TRIES) {
     //  Wait for data to be available
@@ -1179,7 +1248,7 @@ Environment_Data get_ens160 (Environment_Data curr_data, ScioSense_ENS160 *ens) 
   }
 
   if (count < ENS160_MAX_TRIES) {
-    sensors = check_data(curr_data);
+    sensors = check_data(mx, curr_data);
 
     sensors.ens160.valid = true;
 
@@ -1204,12 +1273,15 @@ Environment_Data get_ens160 (Environment_Data curr_data, ScioSense_ENS160 *ens) 
   Get readings from the LSM6DSOX IMU and put them in the environment
     data structure.
 */
-Environment_Data get_lsm6dsox (Environment_Data curr_data, Adafruit_LIS3MDL *lis3, bool is_9d0f=true) {
+Environment_Data get_lsm6dsox (QWIICMUX *mx, Environment_Data curr_data, Adafruit_LIS3MDL *lis3, bool is_9d0f=true) {
   Environment_Data sensors;
   float x, y, z;
   float temperature = 0.0;
 
-  sensors = check_data(curr_data);
+  //  Set the mux port
+  set_mux_port(mx, MUX_LSM6DSOX_9DOF_PORT, MUX_LSM6DSOX_9DOF_NAME);
+  
+  sensors = check_data(mx, curr_data);
 
   if (IMU.accelerationAvailable()) {
     IMU.readAcceleration(x, y, z);
@@ -1236,8 +1308,35 @@ Environment_Data get_lsm6dsox (Environment_Data curr_data, Adafruit_LIS3MDL *lis
 
   if (is_9d0f) {
     //  Read the LIS3MDL Magnetometer that is available
-    get_lis3mdl (curr_data, lis3);
+    get_lis3mdl (mx, curr_data, lis3);
   }
+
+  return sensors;
+}
+
+/*
+  Read ALL the data from the BNO055 9DOF IMU
+*/
+Environment_Data get_bno055 (QWIICMUX *mx, Environment_Data curr_data) {
+  //  Set the mux port
+  set_mux_port(mx, MUX_BNO055_PORT, MUX_BNO055_NAME);
+
+  sensors = check_data(mx, curr_data);
+
+  bno055.getCalibration(&sensors.bno055.system_cal, &sensors.bno055.gyroscope_cal, &sensors.bno055.accelerometer_cal, &sensors.bno055.magnetometer_cal);
+  bno055.getEvent(&sensors.bno055.orientation_data, Adafruit_BNO055::VECTOR_EULER);
+  bno055.getEvent(&sensors.bno055.angular_velocity_data, Adafruit_BNO055::VECTOR_GYROSCOPE);
+  bno055.getEvent(&sensors.bno055.linear_acceleration_data, Adafruit_BNO055::VECTOR_LINEARACCEL);
+  bno055.getEvent(&sensors.bno055.magnetometer_data, Adafruit_BNO055::VECTOR_MAGNETOMETER);
+  bno055.getEvent(&sensors.bno055.accelerometer_data, Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  bno055.getEvent(&sensors.bno055.gravity_data, Adafruit_BNO055::VECTOR_GRAVITY);
+
+  sensors.bno055.x_pos = sensors.bno055.x_pos + ACCEL_POS_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.x;
+  sensors.bno055.y_pos = sensors.bno055.y_pos + ACCEL_POS_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.y;
+
+  //  Velocity of sensor in the direction it's facing
+  sensors.bno055.heading_velocity = ACCEL_VEL_TRANSITION * sensors.bno055.linear_acceleration_data.acceleration.x / cos(DEG_2_RAD * sensors.bno055.orientation_data.orientation.x);
+  sensors.bno055.heading = sensors.bno055.orientation_data.orientation.x;
 
   return sensors;
 }
@@ -1246,13 +1345,16 @@ Environment_Data get_lsm6dsox (Environment_Data curr_data, Adafruit_LIS3MDL *lis
   Get temperature and humidity readings from the SHT45 and put them i sensor
     and put them into the environment data structure.
 */
-Environment_Data get_sht45(Environment_Data curr_data, Adafruit_SHT4x *sht) {
+Environment_Data get_sht45 (QWIICMUX *mx, Environment_Data curr_data, Adafruit_SHT4x *sht) {
   Environment_Data sensors;
   sensors_event_t rel_humidity, temperature;
   uint32_t timestamp = millis();
   float celsius, humidity;
 
-  sensors = check_data(curr_data);
+  //  Set the mux port
+  set_mux_port(mx, MUX_SHT45_PORT, MUX_SHT45_NAME);
+
+  sensors = check_data(mx, curr_data);
 
   sht->getEvent(&rel_humidity, &temperature);// populate temp and humidity objects with fresh data
   celsius = temperature.temperature;
@@ -1264,13 +1366,16 @@ Environment_Data get_sht45(Environment_Data curr_data, Adafruit_SHT4x *sht) {
   return sensors;
 }
 
-Environment_Data get_scd40 (Environment_Data curr_data, SensirionI2CScd4x *scd) {
+Environment_Data get_scd40 (QWIICMUX *mx, Environment_Data curr_data, SensirionI2CScd4x *scd) {
   Environment_Data sensors;
   String error_message;
   uint16_t CO2, error;
   float celsius, fahrenheit, humidity;
 
-  sensors = check_data(curr_data);
+  //  Set the mux port
+  set_mux_port(mx, MUX_SCD40_PORT, MUX_SCD40_NAME);
+
+  sensors = check_data(mx, curr_data);
 
   //  Delay to give the sensor a few seconds
   delay(2000);
@@ -1413,19 +1518,23 @@ void read_switches (uint8_t nr_of_switches=NUMBER_OF_SWITCHES) {
     
 void setup (void) {
   uint8_t note_nr;
+  uint16_t scd_error = 0;
   String firmware_version;
-  bool connected;
-
-  analogWrite(PIEZO_BUZZER_PIN, 0);
+  bool mux_present;
+  bool connected, sensor_found;
 
   //  Initialize serial and wait for the port to open:
   Serial.begin(SERIAL_BAUDRATE);
-  delay(SERIAL_DELAY_MS);
 
-  //  Wait for the serial port to stabilize
-  //while(!Serial) {
-  //  delay(10);
-  //}
+  while(!Serial) {
+    delay(SERIAL_DELAY_MS);
+  }
+
+  //  Start the I2C bus
+  Wire.begin();
+
+  //  Make sure the buzzer is off
+  analogWrite(PIEZO_BUZZER_PIN, 0);
 
   Serial.print(ROBOT_DEVICE_NAME);
   Serial.print(", Version ");
@@ -1433,6 +1542,12 @@ void setup (void) {
   Serial.print(", ");
   Serial.println(ROBOT_DEVICE_DATE);
   Serial.println();
+
+  //  Initialize the Sparkfun I2C Multiplexor - Halt if not present
+  init_mux(&mux);
+
+  //  Start the Real Time Clock and set the current time
+  sensor_found = init_ds3231(&mux, &rtc, &sensor_status);
 
   init_leds();
 
@@ -1459,9 +1574,6 @@ void setup (void) {
   connected = connect_to_wifi(ssid, passwd);
 
   if (connected) {
-    //  Start the I2C bus
-    Wire.begin();
-
     // Turn on the WiFi connection LED
     digitalWrite(LED_RASPI_CONNECT_PIN, HIGH);
 
@@ -1480,94 +1592,50 @@ void setup (void) {
 
     //  Initialize the sensors data structure
     sensors.initialize = true;
-    sensors = check_data(sensors);
+    sensors = check_data(&mux, sensors);
 
-    if (USING_ENS160_MOX) {
-      init_ens160();
+    if (USING_ENS160) {
+      sensor_found = init_ens160(&mux, &ens160, &sensor_status);
     }
 
     //  initialize the SCD-40 CO2, Temperature, and Humidity sensor
-    if (USING_SCD40_CO2) {
-      init_scd40();
+    if (USING_SCD40) {
+      scd_error = init_scd40(&mux, &scd40, &sensor_status);
+
+      if (scd_error == 268) {
+        halt("Could not get the SCD-40 serial number!");
+      } else if (scd_error > 0) {
+        halt("Halt on SCD-40 error, code " + String(scd_error));
+      }
     }
 
     //  Initialize the SHT4x Temperature and Humidity sensors
-    if (USING_SHT45_TEMP) {
-      if (! sht45.begin()) {
-        Serial.println("Could not find an SHT4x sensor!");
-        while (1) delay(1);
-      }
+    if (USING_SHT45) {
+      sensor_found = init_sht4x(&mux, &sht45, &sensor_status);
     }
 
     //  Initialize the LSM6DSOX IMU
-    if (USING_LSM6DSOX_LIS3MDL_IMU) {  
-      if (IMU.begin()) {
-        Serial.println("Found an LSM6DSOX IMU");
-      } else {
-        halt("Cound not find an LSM6DSOX IMU!");
-      }
+    if (USING_LSM6DSOX_9DOF) { 
+      sensor_found = init_lsm6dsox(&mux, &sensor_status); 
+    }
+
+    if (USING_BNO055) {
+      sensor_found = init_bno055(&mux, &bno055, &sensor_status);
     }
 
     //  Initialize the LIS3MDL Magnetometer
-    if (USING_LIS3MDL_MAG) {
-      lis3 = init_lis3mdl(sensors, &lis3, &sensor_status);
+    if (USING_LIS3MDL) {
+      sensor_found = init_lis3mdl(&mux, &lis3, &sensor_status);
     }
 
     //  Initialize the VEML7700 Light (Lux) sensor
-    if (USING_VEML7700_LUX) {
-      if (veml.begin()) {
-        Serial.print("Found a VEML7700 Lux sensor with a Gain of ");
-
-        switch (veml.getGain()) {
-          case VEML7700_GAIN_1:
-            Serial.print("1");
-            break;
-          case VEML7700_GAIN_2:
-            Serial.print("2");
-            break;
-          case VEML7700_GAIN_1_4:
-            Serial.print("1/4");
-            break;
-          case VEML7700_GAIN_1_8:
-            Serial.print("1/8");
-            break;
-        }
-
-        Serial.print(" and Integration Time of ");
-
-        switch (veml.getIntegrationTime()) {
-          case VEML7700_IT_25MS:
-            Serial.print("25");
-            break;
-          case VEML7700_IT_50MS:
-            Serial.print("50");
-            break;
-          case VEML7700_IT_100MS:
-            Serial.print("100");
-            break;
-          case VEML7700_IT_200MS:
-            Serial.print("200");
-            break;
-          case VEML7700_IT_400MS:
-            Serial.print("400");
-            break;
-          case VEML7700_IT_800MS:
-            Serial.print("800");
-            break;
-        }
-
-        Serial.println(" ms");
-      } else {
-        halt("Unable to find the VEML7700 sensor!");
-      }
+    if (USING_VEML7700) {
+      sensor_found = init_veml7700(&mux, &sensor_status);
     }
-
-    //  Start the Real Time Clock and set the current time
-    Serial.println("Starting the RTC");
 
     Serial.println();
     Serial.print("Today is ");
-    Serial.println(timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS));
+    Serial.println(timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS));
   
     //  Start the web servertimestamp 
     Serial.println();
@@ -1581,12 +1649,16 @@ void setup (void) {
   //halt("END OF SETUP HALT");
 
   Serial.println("Initization complete!");
-  delay(1000);
+  //delay(1000);
 }
-
 
 void loop (void) {
   WiFiClient client = server.available();
+  Three_Axis triple;
+
+  //  Counter to avoid printing BNO055 data every 10MS sample
+  uint16_t bno_print_count = 0;
+
   bool send_page = true, connected = (wifi_status == WL_CONNECTED);
   float lux, potentiometer_voltage;
   uint16_t sequence_nr = 0, potentiometer_reading;
@@ -1598,7 +1670,7 @@ void loop (void) {
 
   while (connected) {
     //  Heartbeat
-    blink_rgb(blue);
+    blink_rgb(Blue);
 
     //Serial.println();
     //Serial.print("Loop #");
@@ -1615,7 +1687,7 @@ void loop (void) {
     if (client) {
       HTTP_req = "";
 
-      blink_rgb(magenta);
+      blink_rgb(Magenta);
 
       sequence_nr++;
       start_millis = millis();
@@ -1718,28 +1790,22 @@ void loop (void) {
         switch (page_id) {
           case PAGE_HOME:
             html = PAGE_HTML[PAGE_HOME]; //String(HTML_CONTENT_HOME);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
             Serial.println(PAGE_HOME_NAME);
-
-            //  Replace the markers by real values
-            //html.replace("PAGE_HOME_TITLE_MARKER", PAGE_HOME_TITLE);
-            //html.replace("PAGE_HOME_NAME_MARKER", PAGE_HOME_NAME);
-            //html.replace("SKETCH_CODE_MARKER", SKETCH_ID_CODE);
-            //html.replace("ROBOT_PAGE_NAME_MARKER", ROBOT_DEVICE_NAME);
-            //html.replace("ROBOT_NAME_MARKER", ROBOT_DEVICE_NAME);
             html.replace("SEQUENCE_COUNT_MARKER", String(sequence_nr));
             html.replace("DATESTAMP_MARKER", date_time);
             break;
           case PAGE_ENVIRONMENT:
             html =  PAGE_HTML[PAGE_ENVIRONMENT]; //String(HTML_CONTENT_ENVIRONMENT);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
             Serial.println(PAGE_ENVIRONMENT_NAME);
+            html.replace("DATESTAMP_MARKER", date_time);
             html.replace("SEQUENCE_COUNT_MARKER", String(sequence_nr));
 
             Serial.println("Sending sensor readings");
 
-            if (USING_SHT45_TEMP) {
-              sensors = get_sht45(sensors, &sht45);
+            if (USING_SHT45) {
+              sensors = get_sht45(&mux, sensors, &sht45);
 
               html.replace("SHT45_FAHRENHEIT_MARKER", String(sensors.sht45.fahrenheit));
               html.replace("SHT45_CELSIUS_MARKER", String(sensors.sht45.celsius));
@@ -1750,10 +1816,10 @@ void loop (void) {
               html.replace("SHT45_HUMIDITY_MARKER", "Not used");
             }
 
-            if (USING_SCD40_CO2) {
+            if (USING_SCD40) {
               Serial.println("Getting temperature and humidity readings");
 
-              sensors = get_scd40 (sensors, &scd40);
+              sensors = get_scd40 (&mux,sensors, &scd40);
             
               //  Replace the markers by real values
               html.replace("DATESTAMP_MARKER", date_time);
@@ -1769,8 +1835,8 @@ void loop (void) {
               html.replace("SCD40_CO2_MARKER", "Not used");
             }
 
-            if (USING_ENS160_MOX) {
-              sensors = get_ens160(sensors, &ens160);
+            if (USING_ENS160) {
+              sensors = get_ens160(&mux, sensors, &ens160);
 
               if (sensors.ens160.valid) {
                 html.replace("ENS160_AQI_MARKER", String(sensors.ens160.aqi));
@@ -1794,7 +1860,7 @@ void loop (void) {
             break;
           case PAGE_SWITCHES:
             html = PAGE_HTML[PAGE_SWITCHES];  //String(HTML_CONTENT_SWITCHES);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
             read_switches();
             show_switches();
             set_leds();
@@ -1808,7 +1874,7 @@ void loop (void) {
             break;
           case PAGE_POTENTIOMETER:
             html = PAGE_HTML[PAGE_POTENTIOMETER]; //String(HTML_CONTENT_POTENTIOMETER);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
 
             //  Read the potentiomenter
             potentiometer_reading = analogRead(ANALOG_POT_PIN);
@@ -1838,7 +1904,7 @@ void loop (void) {
             break;
           case PAGE_LIGHT:
             html = PAGE_HTML[PAGE_LIGHT]; //String(HTML_CONTENT_LIGHT);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
             lux = read_veml7700(&veml);
 
             //  Replace the markers by real values
@@ -1849,22 +1915,76 @@ void loop (void) {
             break;
           case PAGE_IMU:
             html = PAGE_HTML[PAGE_IMU]; //String(HTML_CONTENT_IMU);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
-            sensors = get_lsm6dsox(sensors, &lis3);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
 
-            //  Replace the markers by real values
-            temp_html = imu_format_xyz_html(sensors.lsm6dsox.accelerometer);
-            html.replace("IMU_ACCELEROMETER_MARKER", temp_html);
-            temp_html = imu_format_xyz_html(sensors.lsm6dsox.gyroscope);
-            html.replace("IMU_GYROSCOPE_MARKER", temp_html);
-            temp_html = imu_format_xyz_html(sensors.lsm6dsox.magnetometer);
-            html.replace("IMU_MAGNETOMETER_MARKER", temp_html);
+            if (USING_LSM6DSOX_9DOF or USING_LSM6DSOX_6DOF) {
+              sensors = get_lsm6dsox(&mux, sensors, &lis3);
+
+              //  Replace the markers by real values
+              temp_html = imu_format_xyz_html(sensors.lsm6dsox.accelerometer);
+              html.replace("IMU_ACCELEROMETER_MARKER", temp_html);
+              temp_html = imu_format_xyz_html(sensors.lsm6dsox.gyroscope);
+              html.replace("IMU_GYROSCOPE_MARKER", temp_html);
+              temp_html = imu_format_xyz_html(sensors.lsm6dsox.magnetometer);
+              html.replace("IMU_MAGNETOMETER_MARKER", temp_html);
+            }
+
+            if (USING_BNO055) {
+              //  Read all the data from the IMU
+              sensors = get_bno055(&mux, sensors);
+
+              bno_print_event(&sensors.bno055.orientation_data);
+              bno_print_event(&sensors.bno055.angular_velocity_data);
+              bno_print_event(&sensors.bno055.linear_acceleration_data);
+              bno_print_event(&sensors.bno055.magnetometer_data);
+              bno_print_event(&sensors.bno055.accelerometer_data);
+              bno_print_event(&sensors.bno055.gravity_data);
+
+              triple.x = sensors.bno055.accelerometer_data.acceleration.x;
+              triple.y = sensors.bno055.accelerometer_data.acceleration.y;
+              triple.z = sensors.bno055.accelerometer_data.acceleration.z;
+
+              temp_html = imu_format_xyz_html(triple);
+              html.replace("IMU_ACCELEROMETER_MARKER", temp_html);
+
+              triple.x = sensors.bno055.gravity_data.gyro.x;
+              triple.y = sensors.bno055.gravity_data.gyro.y;
+              triple.z = sensors.bno055.gravity_data.gyro.z;
+
+              temp_html = imu_format_xyz_html(triple);
+              html.replace("IMU_GYROSCOPE_MARKER", temp_html);
+
+              triple.x = sensors.bno055.magnetometer_data.magnetic.x;
+              triple.y = sensors.bno055.magnetometer_data.magnetic.y;
+              triple.z = sensors.bno055.magnetometer_data.magnetic.z;
+
+              temp_html = imu_format_xyz_html(triple);
+              html.replace("IMU_MAGNETOMETER_MARKER", temp_html);
+
+               if (bno_print_count * BNO055_SAMPLERATE_DELAY_MS >= PRINT_DELAY_MS) {
+                //  Enough iterations have passed that we can print the latest data
+                Serial.print("Heading: ");
+                Serial.println(sensors.bno055.heading);
+                Serial.print(", Position: ");
+                Serial.print(sensors.bno055.x_pos);
+                Serial.print(", ");
+                Serial.println(sensors.bno055.y_pos);
+                Serial.print("Speed: ");
+                Serial.print(sensors.bno055.heading_velocity);
+                Serial.println("---------------------------");
+
+                bno_print_count = 0;
+              } else {
+                bno_print_count += 1;
+              }
+            }
+
             html.replace("DATESTAMP_MARKER", date_time);
             html.replace("SEQUENCE_COUNT_MARKER", String(sequence_nr));
             break;
           case PAGE_ERROR_404:
             html = String(HTML_CONTENT_404);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
 
             //  Replace the markers by real values
             html.replace("SEQUENCE_COUNTER_MARKER", String(sequence_nr));
@@ -1872,7 +1992,7 @@ void loop (void) {
             break;
           case PAGE_ERROR_405:
             html = String(HTML_CONTENT_405);
-            date_time = timestamp(SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
+            date_time = timestamp(&mux, &rtc, MUX_DS3231_PORT, SHOW_FULL_DATE, SHOW_12_HOURS, SHOW_LONG_DATE, SHOW_SECONDS);
 
             //  Replace the markers by real values
             html.replace("DATESTAMP_MARKER", date_time);
